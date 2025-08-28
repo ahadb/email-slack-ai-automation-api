@@ -192,13 +192,19 @@ async def summarize(
         except Exception as e:
             logger.warning(f"[{request_id}] Failed to save to Supabase: {e}")
 
-    return {
-        "summary": parsed.get("summary", ""),
-        "categories": parsed.get("categories", {}),
-        "saved": saved,
-        "request_id": request_id,
-        "processing_time": llm_time
-    }
+    summary = parsed.get("summary", "")
+
+    # If summary is a list, join or grab first item
+    if isinstance(summary, list):
+        summary = " ".join(summary)
+
+    return summary
+    # {   
+    #     "categories": parsed.get("categories", {}),
+    #     "saved": saved,
+    #     "request_id": request_id,
+    #     "processing_time": llm_time
+    # }
 
 @app.get("/health")
 async def health():
