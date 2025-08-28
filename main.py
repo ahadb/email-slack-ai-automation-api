@@ -214,3 +214,7 @@ async def health():
 async def debug_env():
     val = os.getenv("OPENAI_API_KEY")
     return {"OPENAI_API_KEY": "set" if val else None}
+
+@app.get("/")
+async def root():
+    return {"status": "alive"}
