@@ -5,8 +5,8 @@ import os, json, uuid
 from langchain.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 from langchain.chains import LLMChain
-from langsmith import Client
-from langchain.callbacks import LangChainTracer
+# from langsmith import Client
+# from langchain.callbacks import LangChainTracer
 import logging
 import sys
 from datetime import datetime
@@ -26,24 +26,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- LangSmith Setup ---
-# Only enable LangSmith if API key is provided
-langsmith_enabled = bool(os.getenv("LANGCHAIN_API_KEY"))
-
-if langsmith_enabled:
-    # Set LangSmith environment variables
-    os.environ["LANGCHAIN_TRACING_V2"] = "true"
-    os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
-    os.environ["LANGCHAIN_API_KEY"] = os.getenv("LANGCHAIN_API_KEY")
-    os.environ["LANGCHAIN_PROJECT"] = os.getenv("LANGCHAIN_PROJECT", "email-slack-automation")
-    
-    # Initialize LangSmith client
-    langsmith_client = Client()
-    print("✅ LangSmith tracing enabled")
-else:
-    # Disable LangSmith tracing
-    os.environ["LANGCHAIN_TRACING_V2"] = "false"
-    langsmith_client = None
-    print("⚠️  LangSmith tracing disabled - no API key provided")
+# Temporarily disabled due to compatibility issues
+langsmith_enabled = False
+langsmith_client = None
+print("⚠️  LangSmith temporarily disabled for compatibility")
 
 # --- Setup ---
 app = FastAPI()
@@ -233,31 +219,12 @@ async def summarize(
         llm_time = time.time() - start_time
         logger.info(f"[{request_id}] LLM completed in {llm_time:.2f}s")
         
-        # Log successful operation to LangSmith (if API key is available)
-        if os.getenv("LANGCHAIN_API_KEY"):
-            try:
-                langsmith_client.create_feedback(
-                    run_id=chain.last_run_id,
-                    key="summarization_success",
-                    score=1.0,
-                    comment="Successful summarization"
-                )
-            except Exception as feedback_error:
-                logger.warning(f"[{request_id}] Could not log feedback: {feedback_error}")
+        # LangSmith feedback temporarily disabled
+        pass
         
     except Exception as e:
         logger.error(f"[{request_id}] LLM error: {str(e)}")
-        # Log errors to LangSmith (if API key is available)
-        if os.getenv("LANGCHAIN_API_KEY") and hasattr(chain, 'last_run_id') and chain.last_run_id:
-            try:
-                langsmith_client.create_feedback(
-                    run_id=chain.last_run_id,
-                    key="summarization_error",
-                    score=0.0,
-                    comment=f"Error: {str(e)}"
-                )
-            except Exception as feedback_error:
-                logger.warning(f"[{request_id}] Could not log feedback: {feedback_error}")
+        # LangSmith feedback temporarily disabled
         raise HTTPException(status_code=500, detail=f"LLM processing failed: {str(e)}")
 
     try:
@@ -309,48 +276,9 @@ async def health():
 @app.get("/traces")
 async def get_traces(limit: int = 10):
     """Get recent LangSmith traces for monitoring"""
-    if not langsmith_client:
-        return {"error": "LangSmith not enabled - no API key provided"}
-    
-    try:
-        traces = langsmith_client.list_runs(
-            project_name=os.getenv("LANGCHAIN_PROJECT", "email-slack-automation"),
-            limit=limit
-        )
-        return {
-            "traces": [
-                {
-                    "id": trace.id,
-                    "name": trace.name,
-                    "status": trace.status,
-                    "start_time": trace.start_time.isoformat() if trace.start_time else None,
-                    "end_time": trace.end_time.isoformat() if trace.end_time else None,
-                    "tags": trace.tags,
-                    "metadata": trace.metadata
-                }
-                for trace in traces
-            ]
-        }
-    except Exception as e:
-        return {"error": str(e)}
+    return {"error": "LangSmith temporarily disabled for compatibility"}
 
 @app.get("/logs")
 async def get_logs():
     """Get LangSmith project info and recent activity"""
-    if not langsmith_client:
-        return {"error": "LangSmith not enabled - no API key provided"}
-    
-    try:
-        project = langsmith_client.read_project(
-            project_name=os.getenv("LANGCHAIN_PROJECT", "email-slack-automation")
-        )
-        return {
-            "project": {
-                "name": project.name,
-                "description": project.description,
-                "created_at": project.created_at.isoformat() if project.created_at else None
-            },
-            "langsmith_url": f"https://smith.langchain.com/projects/{project.id}"
-        }
-    except Exception as e:
-        return {"error": str(e)}
+    return {"error": "LangSmith temporarily disabled for compatibility"}
