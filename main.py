@@ -39,11 +39,10 @@ print("⚠️  LangSmith temporarily disabled for compatibility")
 # --- Setup ---
 app = FastAPI()
 
-# Request ID middleware
+# Request ID middleware - simplified for older FastAPI
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
     request_id = str(uuid.uuid4())
-    request.state.request_id = request_id
     logger.info(f"Request started: {request_id} - {request.method} {request.url}")
     
     response = await call_next(request)
@@ -212,7 +211,7 @@ async def summarize(
     request: Request,
     rate_limit: bool = Depends(check_rate_limit)
 ):
-    request_id = getattr(request.state, 'request_id', 'unknown')
+    request_id = str(uuid.uuid4())
     logger.info(f"[{request_id}] Starting summarization for {len(req.messages)} messages from {req.source}")
     
     # 1. Format messages for the LLM
