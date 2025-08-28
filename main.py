@@ -1,17 +1,16 @@
 from fastapi import FastAPI, Request, HTTPException, Depends
 from pydantic import BaseModel
-import psycopg2
 import os, json, uuid, sys, time, logging
 from datetime import datetime
 from typing import List
 from fastapi.security import HTTPBearer
 from collections import defaultdict
-from contextlib import contextmanager
 
 from dotenv import load_dotenv
 from langchain.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 from langchain.chains import LLMChain
+from supabase import create_client, Client   # ✅ NEW
 
 load_dotenv()
 
@@ -29,9 +28,10 @@ logger = logging.getLogger(__name__)
 # --- Setup ---
 app = FastAPI()
 
-# Placeholders for LLM + chain
+# Placeholders
 llm = None
 chain = None
+supabase: Client | None = None
 
 # --- Request ID middleware ---
 @app.middleware("http")
@@ -57,60 +57,6 @@ prompt = PromptTemplate(
     Return only JSON.
     """
 )
-
-# --- Database Connection Management ---
-import psycopg2.pool
-
-db_pool = None
-try:
-    db_url = os.getenv("SUPABASE_DB_URL")
-    if db_url:
-        if os.getenv("RAILWAY_STATIC_URL"):  # detect Railway
-            db_pool = psycopg2.pool.SimpleConnectionPool(
-                minconn=1,
-                maxconn=10,
-                dsn=db_url.strip(),
-                options="-c inet_family=4"
-            )
-        else:
-            db_pool = psycopg2.pool.SimpleConnectionPool(
-                minconn=1,
-                maxconn=10,
-                dsn=db_url.strip()
-            )
-        print("✅ Database connection pool created successfully")
-    else:
-        print("⚠️ SUPABASE_DB_URL not set")
-except Exception as e:
-    print(f"⚠️  Database connection failed: {e}")
-    db_pool = None
-
-@contextmanager
-def get_db_connection():
-    if not db_pool:
-        raise Exception("Database not available")
-    conn = None
-    try:
-        conn = db_pool.getconn()
-        yield conn
-    except Exception as e:
-        if conn:
-            conn.rollback()
-        raise e
-    finally:
-        if conn:
-            db_pool.putconn(conn)
-
-def check_db_health():
-    if not db_pool:
-        return False
-    try:
-        with get_db_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT 1")
-                return True
-    except Exception:
-        return False
 
 # --- Input Schemas ---
 rate_limit_storage = defaultdict(list)
@@ -154,10 +100,12 @@ def check_rate_limit(client_ip: str = Depends(lambda: "default")):
     rate_limit_storage[client_ip].append(current_time)
     return True
 
-# --- Startup event: init LLM + chain ---
+# --- Startup event: init LLM + Supabase client ---
 @app.on_event("startup")
 async def startup_event():
-    global llm, chain
+    global llm, chain, supabase
+
+    # OpenAI
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("❌ OPENAI_API_KEY is missing in environment")
@@ -168,6 +116,16 @@ async def startup_event():
     )
     chain = LLMChain(llm=llm, prompt=prompt, tags=["email-summarization-chain"])
     logger.info("✅ ChatOpenAI + LLMChain initialized successfully")
+
+    # Supabase
+    url = os.getenv("SUPABASE_URL")
+    key = os.getenv("SUPABASE_ANON_KEY")
+    if not url or not key:
+        logger.warning("⚠️ SUPABASE_URL or SUPABASE_ANON_KEY not set")
+        supabase = None
+    else:
+        supabase = create_client(url, key)
+        logger.info("✅ Supabase client initialized")
 
 # --- Endpoints ---
 @app.post("/summarize")
@@ -207,16 +165,50 @@ async def summarize(
     except json.JSONDecodeError:
         parsed = {"summary": result, "categories": {}}
 
+    # --- Save to Supabase ---
+    saved = False
+    message_ids = []
+    if supabase:
+        try:
+            # Insert messages
+            for m in req.messages:
+                res = supabase.table("messages").insert({
+                    "source": req.source,
+                    "sender": m.sender,
+                    "content": m.text
+                }).execute()
+                if res.data:
+                    message_ids.append(res.data[0]["id"])
+
+            # Insert summary
+            if message_ids:
+                supabase.table("summaries").insert({
+                    "message_ids": message_ids,
+                    "summary": parsed.get("summary", ""),
+                    "categories": parsed.get("categories", {})
+                }).execute()
+                saved = True
+                logger.info(f"[{request_id}] Saved {len(message_ids)} messages + summary to Supabase")
+        except Exception as e:
+            logger.warning(f"[{request_id}] Failed to save to Supabase: {e}")
+
     return {
         "summary": parsed.get("summary", ""),
         "categories": parsed.get("categories", {}),
+        "saved": saved,
         "request_id": request_id,
         "processing_time": llm_time
     }
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "db": check_db_health()}
+    if supabase:
+        try:
+            supabase.table("messages").select("id").limit(1).execute()
+            return {"status": "ok", "db": True}
+        except Exception as e:
+            return {"status": "ok", "db": False, "error": str(e)}
+    return {"status": "ok", "db": False}
 
 @app.get("/debug/env")
 async def debug_env():
