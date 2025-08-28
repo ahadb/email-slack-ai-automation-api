@@ -63,12 +63,24 @@ import psycopg2.pool
 
 db_pool = None
 try:
-    db_pool = psycopg2.pool.SimpleConnectionPool(
-        minconn=1,
-        maxconn=10,
-        dsn=os.getenv("SUPABASE_DB_URL")
-    )
-    print("✅ Database connection pool created successfully")
+    db_url = os.getenv("SUPABASE_DB_URL")
+    if db_url:
+        if os.getenv("RAILWAY_STATIC_URL"):  # detect Railway
+            db_pool = psycopg2.pool.SimpleConnectionPool(
+                minconn=1,
+                maxconn=10,
+                dsn=db_url.strip(),
+                options="-c inet_family=4"
+            )
+        else:
+            db_pool = psycopg2.pool.SimpleConnectionPool(
+                minconn=1,
+                maxconn=10,
+                dsn=db_url.strip()
+            )
+        print("✅ Database connection pool created successfully")
+    else:
+        print("⚠️ SUPABASE_DB_URL not set")
 except Exception as e:
     print(f"⚠️  Database connection failed: {e}")
     db_pool = None
