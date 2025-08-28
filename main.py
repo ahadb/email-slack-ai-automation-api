@@ -54,7 +54,6 @@ async def add_request_id(request: Request, call_next):
 llm = ChatOpenAI(
     model="gpt-4o-mini", 
     temperature=0, 
-    api_key=os.getenv("OPENAI_API_KEY"),
     tags=["email-summarization"]
 )
 
